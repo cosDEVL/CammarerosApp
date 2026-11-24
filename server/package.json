@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "chalk": "^6.0.1",
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -22,6 +23,7 @@
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.12.1",
     "postgres": "^4.1.1",
-    "util": "^0.12.5"
+    "util": "^0.12.5",
+    "zod": "^4.6.7"
   }
 }

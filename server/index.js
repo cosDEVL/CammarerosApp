@@ -1,37 +1,68 @@
-const express = require('express');
 const dotenv = require('dotenv');
-const AppError = require('./utils/AppError');
-// const postgres = require('postgres').default;
-
-console.log(process.argv);
-
 
 if (process.argv[2] === 'prod') {
   dotenv.config({ path: './.env.production' })
   console.log("PRODUCTION MODE");
-
 } else
   if (process.argv[2] === 'dev') {
     dotenv.config({ path: './.env.development' })
     console.log("DEVELOPMENT MODE");
-
   }
 
+const express = require('express');
+const morgan = require('morgan');
 
+const ErrorHandler = require('./middlewares/ErrorHandler');
+const AppError = require('./utils/AppError');
+const { PostgresError } = require('postgres').default;
+const sql = require('./config/postgresDB');
+const log = require('./utils/Log');
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
+
+const userRouter = require('./routes/userRoutes');
+
+
+
+const port = process.env.PORT;
 const app = express();
 
+if (process.env.NODE_ENV === 'development') app.use(morgan('dev'));
+app.use(express.json());
+app.use(cookieParser());
+app.use(helmet());
+
+app.use('/api/v1/user', userRouter);
 
 
-// const sql = postgres({
-//   host: 'localhost',
-//   port: '6543',
-//   database: 'cammarerodDB',
-//   username: 'cammareros_db',
-//   password: 'cammareros30'
-// })
-
-
-app.listen(process.env.PORT, () => {
-  console.log(`CammarerosServer listening on port ${process.env.PORT}`);
-
+app.use((req, res, next) => {
+  next(new AppError(404, `Route ${req.method} ${req.originalUrl} not found`))
 })
+
+app.use(ErrorHandler);
+
+async function startServer() {
+  try {
+
+    await sql`SELECT 1`;
+    log.ok(`Connection to PostgreSQL "${process.env.DB_DATABASE}" database is successfull `);
+
+    app.listen(port, () => {
+      log.ok(`Cammareros-Server listening on port ${port}`);
+
+    })
+
+  } catch (err) {
+    if (err instanceof PostgresError) {
+      log.warn('Unable to connect with the PostgreSQL database!');
+      log.error(err.message);
+    } else {
+      log.warn('Unable to start the server!');
+      log.error(err.message);
+    }
+
+    process.exit(1)
+  }
+}
+
+startServer()
