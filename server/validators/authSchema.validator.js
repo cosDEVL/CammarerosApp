@@ -9,4 +9,9 @@ const registerFormSchema = z.strictObject({
   invite_code: z.string().trim().min(1, 'Invite code required')
 })
 
-module.exports = {registerFormSchema}
+const loginFormSchema = z.strictObject({
+  email: z.email({ pattern: z.regexes.email }).trim().min(1, 'Email required').toLowerCase(),
+  password: z.string().trim().min(1, 'Password required')
+})
+
+module.exports = {registerFormSchema, loginFormSchema}

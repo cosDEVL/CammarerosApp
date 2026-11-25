@@ -12,15 +12,18 @@ if (process.argv[2] === 'prod') {
 const express = require('express');
 const morgan = require('morgan');
 
-const ErrorHandler = require('./middlewares/ErrorHandler');
-const AppError = require('./utils/AppError');
+const ErrorHandler = require('./middlewares/errorHandler.middleware');
+const AppError = require('./utils/appError');
 const { PostgresError } = require('postgres').default;
 const sql = require('./config/postgresDB');
-const log = require('./utils/Log');
+const log = require('./utils/log');
 const helmet = require('helmet');
+const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
-const userRouter = require('./routes/userRoutes');
+const authRouter = require('./routes/auth.router');
+const verifyAccess = require('./middlewares/verifyAccess.middleware')
+const verifyRefresh = require('./middlewares/verifyRefresh.middleware')
 
 
 
@@ -28,11 +31,23 @@ const port = process.env.PORT;
 const app = express();
 
 if (process.env.NODE_ENV === 'development') app.use(morgan('dev'));
+app.use(cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true
+}))
 app.use(express.json());
 app.use(cookieParser());
 app.use(helmet());
 
-app.use('/api/v1/user', userRouter);
+app.use('/api/v1/auth', authRouter);
+
+app.get('/api/v1/auth/get', verifyRefresh, (req, res) => {
+  const test = sql`SELECT 1`;
+
+  // console.log(req.cookies);
+
+  res.send(test);
+})
 
 
 app.use((req, res, next) => {

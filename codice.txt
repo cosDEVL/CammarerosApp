@@ -1,0 +1,562 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: **/package-lock.json
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+server/
+  config/
+    postgresDB.js
+  controllers/
+    auth.controller.js
+  middlewares/
+    ErrorHandler.js
+    ValidateSchema.js
+  repositories/
+    auth.repository.js
+  routes/
+    user.router.js
+  services/
+    auth.service.js
+  utils/
+    AppError.js
+    Log.js
+  validators/
+    authSchema.validator.js
+  index.js
+  package.json
+.gitignore
+README.md
+
+================================================================
+Files
+================================================================
+
+================
+File: server/routes/user.router.js
+================
+const express = require('express');
+const router = express.Router();
+const { validateRegistration } = require('../middlewares/ValidateSchema');
+const { registerFormSchema } = require('../validators/authSchema.validator');
+const authController = require('../controllers/auth.controller');
+
+
+router.post('/register', validateRegistration(registerFormSchema), authController.registerUser);
+
+module.exports = router;
+
+================
+File: server/config/postgresDB.js
+================
+const postgres = require('postgres').default;
+
+const sql = postgres({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_DATABASE,
+  username: process.env.DB_USERNAME,
+  password: process.env.DB_PASSWORD,
+})
+
+module.exports = sql;
+
+================
+File: server/controllers/auth.controller.js
+================
+const authService = require('../services/auth.service');
+
+const registerUser = async (req, res) => {
+  const user = await authService.registerUser(req.body);
+
+  res.status(201).json({
+    status: 'ok',
+    message: 'User registered successfully!',
+    user
+  })
+}
+
+module.exports = { registerUser };
+
+================
+File: server/middlewares/ErrorHandler.js
+================
+const { ZodError, z } = require("zod");
+const AppError = require("../utils/AppError");
+const { PostgresError } = require('postgres').default
+
+module.exports = (err, req, res, next) => {
+  let statusCode = 500;
+  let status = "Error";
+  let message = "Internal Server Error";
+  let errors = null;
+
+  // console.error(err)
+
+  if (err.isOperational) {
+    statusCode = err.statusCode;
+    status = err.status;
+    message = err.message;
+    errors = err.errors;
+  } else {
+    console.log(err);
+  }
+
+  res.status(statusCode).json({
+    status, message, ...(errors && { errors: errors })
+  })
+
+}
+
+================
+File: server/middlewares/ValidateSchema.js
+================
+// const registerFormSchema = require("../validators/authSchema.validator");
+const AppError = require("../utils/AppError");
+const { z } = require("zod");
+
+
+const validateRegistration = (schema) => async (req, res, next) => {
+
+  try {
+    await schema.parseAsync(req.body);
+
+      req.formData = req.body;
+      next()
+  } catch (err) {
+
+    const errors = err.issues.map(i => {
+      return {
+        field: i.path[0],
+        code: i.code,
+        message: i.message
+      }
+
+    })
+
+    next(new AppError(400, "Form validation failed", errors))
+ }
+
+}
+
+
+module.exports = { validateRegistration };
+
+================
+File: server/repositories/auth.repository.js
+================
+const sql = require('../config/postgresDB');
+
+const createUser = async ({name, lastname, phone, email, passwordHash}) => {
+  const [user] = await sql`
+    INSERT INTO USERS (name, lastname, phone, email, password_hash)
+    VALUES (${name}, ${lastname}, ${phone}, ${email}, ${passwordHash})
+    RETURNING id, name, lastname, phone, email, role
+    `;
+
+  return user;
+}
+
+
+module.exports = { createUser };
+
+================
+File: server/services/auth.service.js
+================
+const bcrypt = require('bcryptjs');
+const AppError = require('../utils/AppError');
+const authRepo = require('../repositories/auth.repository');
+
+const registerUser = async ({ name, lastname, phone, email, password, invite_code }) => {
+  if (invite_code !== 'cammareros-invite')
+    throw new AppError(400, "Enter the correct invite code");
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  const user = await authRepo.createUser({ name, lastname, phone, email, passwordHash })
+
+  return user;
+}
+
+module.exports = { registerUser };
+
+================
+File: server/utils/Log.js
+================
+const chalk = require('chalk').default;
+
+const log = {
+  message: (content) => {
+    console.log(content)
+  },
+  ok: (content) => {
+    console.log(chalk.blue(content))
+  },
+  success: (content) => {
+    console.log(chalk.green(content))
+  },
+  warn: (content) => {
+    console.log(chalk.yellow(content))
+  },
+  error: (content) => {
+    console.log(chalk.red(content))
+  },
+}
+
+module.exports = log
+
+================
+File: server/validators/authSchema.validator.js
+================
+const { z } = require('zod');
+
+const registerFormSchema = z.strictObject({
+  name: z.string().trim().min(1, 'Name is required').max(50),
+  lastname: z.string().trim().min(1, 'Last Name is required').max(50),
+  phone: z.string().trim().regex(/^\d{10}$/, 'The phone number must have 10 digits'),
+  email: z.email({ pattern: z.regexes.email }).trim().min(1, 'Email required').toLowerCase(),
+  password: z.string().trim().min(8, 'Password must be between 8 and 20 characters long').max(20, 'Password must be between 8 and 20 characters long'),
+  invite_code: z.string().trim().min(1, 'Invite code required')
+})
+
+module.exports = {registerFormSchema}
+
+================
+File: .gitignore
+================
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumented libs generated by jscoverage/JSCover
+lib-cov
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
+.grunt
+
+# Bower dependency directory (https://bower.io/)
+bower_components
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons (https://nodejs.org/api/addons.html)
+build/Release
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Snowpack dependency directory (https://snowpack.dev/)
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+out
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+.output
+
+# NitroJS
+.nitro/
+
+# Gatsby files
+.cache/
+# Comment in the public line in if your project uses Gatsby and not Next.js
+# https://nextjs.org/blog/next-9-1#public-directory-support
+# public
+
+# vuepress build output
+.vuepress/dist
+
+# vuepress v2.x temp directory
+.temp
+
+# Sveltekit cache directory
+.svelte-kit/
+
+# vitepress build output
+**/.vitepress/dist
+
+# vitepress cache directory
+**/.vitepress/cache
+
+# Docusaurus cache and generated files
+.docusaurus
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# Firebase cache directory
+.firebase/
+
+# TernJS port file
+.tern-port
+
+# Stores Visual Studio Code versions used for testing Visual Studio Code extensions
+.vscode-test
+
+# pnpm
+.pnpm-store
+
+# yarn v3
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Vite files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
+
+# Astro generated types
+.astro/
+
+# Turbo Repo (https://turborepo.dev/)
+.turbo
+
+# Nx (https://nx.dev/)
+.nx/cache
+.nx/workspace-data
+.nx/migrate-runs
+
+================
+File: README.md
+================
+# CammarerosApp
+This app simplifies the organization of the service team across shifts. It lets the maitre create service groups and assign the waiters to them. Team members can easily check their assing groups and mark their unavailable dates
+
+================
+File: server/utils/AppError.js
+================
+class AppError extends Error {
+  constructor(statusCode, message, errors = null) {
+    super(message);
+
+    this.statusCode = statusCode;
+    this.status = `${statusCode}`.startsWith(`4`) ? `Fail` : `Error`;
+    this.errors = errors;
+    this.isOperational = true;
+
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+module.exports = AppError;
+
+================
+File: server/index.js
+================
+const dotenv = require('dotenv');
+
+if (process.argv[2] === 'prod') {
+  dotenv.config({ path: './.env.production' })
+  console.log("PRODUCTION MODE");
+} else
+  if (process.argv[2] === 'dev') {
+    dotenv.config({ path: './.env.development' })
+    console.log("DEVELOPMENT MODE");
+  }
+
+const express = require('express');
+const morgan = require('morgan');
+
+const ErrorHandler = require('./middlewares/ErrorHandler');
+const AppError = require('./utils/AppError');
+const { PostgresError } = require('postgres').default;
+const sql = require('./config/postgresDB');
+const log = require('./utils/Log');
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
+
+const userRouter = require('./routes/user.router');
+
+
+
+const port = process.env.PORT;
+const app = express();
+
+if (process.env.NODE_ENV === 'development') app.use(morgan('dev'));
+app.use(express.json());
+app.use(cookieParser());
+app.use(helmet());
+
+app.use('/api/v1/user', userRouter);
+
+
+app.use((req, res, next) => {
+  next(new AppError(404, `Route ${req.method} ${req.originalUrl} not found`))
+})
+
+app.use(ErrorHandler);
+
+async function startServer() {
+  try {
+
+    await sql`SELECT 1`;
+    log.ok(`Connection to PostgreSQL "${process.env.DB_DATABASE}" database is successfull `);
+
+    app.listen(port, () => {
+      log.ok(`Cammareros-Server listening on port ${port}`);
+
+    })
+
+  } catch (err) {
+    if (err instanceof PostgresError) {
+      log.warn('Unable to connect with the PostgreSQL database!');
+      log.error(err.message);
+    } else {
+      log.warn('Unable to start the server!');
+      log.error(err.message);
+    }
+
+    process.exit(1)
+  }
+}
+
+startServer()
+
+================
+File: server/package.json
+================
+{
+  "name": "cammareros-server",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "chalk": "^6.0.1",
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "express-validator": "^7.3.2",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.12.1",
+    "postgres": "^4.1.1",
+    "util": "^0.12.5",
+    "zod": "^4.6.7"
+  }
+}
+
+
+
+
+
+================================================================
+End of Codebase
+================================================================
