@@ -13,7 +13,7 @@ const accessCookieOptions = {
 
 const refreshCookieOptions = {
   ...baseCookieOptions,
-  path: '/api/v1/auth/'
+  path: '/api/v1/auth'
 };
 
 const setAuthCookie = (res, { accessToken, refreshToken }) => {

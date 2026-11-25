@@ -18,14 +18,16 @@ const registerUser = async ({ name, lastname, phone, email, password, invite_cod
 
 const loginUser = async ({ email, password }) => {
 
-  const userCredentials = await authRepo.getUserCredentials(email);
+  const user = await authRepo.getUser(email);
 
   if (
-    !userCredentials.is_active ||
-    !(await bcrypt.compare(password, userCredentials.password_hash))
-  ) throw new AppError(400, "Email or Password incorrect");
+    !user ||
+    !(await bcrypt.compare(password, user.password_hash)) ||
+    !user.is_active
+  ) throw new AppError(401, "Email or Password incorrect");
 
-  return userCredentials;
+  const { id, name, lastname, phone, role } = user;
+  return { id, name, lastname, phone, email: user.email, role };
 }
 
 

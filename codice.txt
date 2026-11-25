@@ -52,17 +52,25 @@ server/
   controllers/
     auth.controller.js
   middlewares/
-    ErrorHandler.js
-    ValidateSchema.js
+    errorHandler.middleware.js
+    validateSchema.middleware.js
+    verifyAccess.middleware.js
+    verifyRefresh.middleware.js
   repositories/
     auth.repository.js
+    token.repository.js
   routes/
-    user.router.js
+    auth.router.js
   services/
     auth.service.js
+    clearCookie.service.js
+    rotateCookie.service.js
+    setCookie.service.js
   utils/
-    AppError.js
-    Log.js
+    appError.js
+    cookie.js
+    log.js
+    token.js
   validators/
     authSchema.validator.js
   index.js
@@ -75,155 +83,42 @@ Files
 ================================================================
 
 ================
-File: server/routes/user.router.js
+File: server/services/rotateCookie.service.js
 ================
-const express = require('express');
-const router = express.Router();
-const { validateRegistration } = require('../middlewares/ValidateSchema');
-const { registerFormSchema } = require('../validators/authSchema.validator');
-const authController = require('../controllers/auth.controller');
+const { rotateHashToken } = require("../repositories/token.repository");
+const { setAuthCookie } = require("../utils/cookie");
+const { signAccessToken, signRefreshToken, hashToken } = require("../utils/token");
 
+module.exports = async (user, oldRefreshToken, res) => {
+  const accessToken = signAccessToken(user);
+  const refreshToken = signRefreshToken(user);
 
-router.post('/register', validateRegistration(registerFormSchema), authController.registerUser);
+  const newHashRefresh = hashToken(refreshToken);
+  await rotateHashToken(oldRefreshToken, newHashRefresh);
 
-module.exports = router;
-
-================
-File: server/config/postgresDB.js
-================
-const postgres = require('postgres').default;
-
-const sql = postgres({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_DATABASE,
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-})
-
-module.exports = sql;
-
-================
-File: server/controllers/auth.controller.js
-================
-const authService = require('../services/auth.service');
-
-const registerUser = async (req, res) => {
-  const user = await authService.registerUser(req.body);
-
-  res.status(201).json({
-    status: 'ok',
-    message: 'User registered successfully!',
-    user
-  })
+  setAuthCookie(res, {accessToken, refreshToken})
 }
 
-module.exports = { registerUser };
-
 ================
-File: server/middlewares/ErrorHandler.js
+File: server/utils/appError.js
 ================
-const { ZodError, z } = require("zod");
-const AppError = require("../utils/AppError");
-const { PostgresError } = require('postgres').default
+class AppError extends Error {
+  constructor(statusCode, message, errors = null) {
+    super(message);
 
-module.exports = (err, req, res, next) => {
-  let statusCode = 500;
-  let status = "Error";
-  let message = "Internal Server Error";
-  let errors = null;
+    this.statusCode = statusCode;
+    this.status = `${statusCode}`.startsWith(`4`) ? `Fail` : `Error`;
+    this.errors = errors;
+    this.isOperational = true;
 
-  // console.error(err)
-
-  if (err.isOperational) {
-    statusCode = err.statusCode;
-    status = err.status;
-    message = err.message;
-    errors = err.errors;
-  } else {
-    console.log(err);
+    Error.captureStackTrace(this, this.constructor);
   }
-
-  res.status(statusCode).json({
-    status, message, ...(errors && { errors: errors })
-  })
-
 }
 
-================
-File: server/middlewares/ValidateSchema.js
-================
-// const registerFormSchema = require("../validators/authSchema.validator");
-const AppError = require("../utils/AppError");
-const { z } = require("zod");
-
-
-const validateRegistration = (schema) => async (req, res, next) => {
-
-  try {
-    await schema.parseAsync(req.body);
-
-      req.formData = req.body;
-      next()
-  } catch (err) {
-
-    const errors = err.issues.map(i => {
-      return {
-        field: i.path[0],
-        code: i.code,
-        message: i.message
-      }
-
-    })
-
-    next(new AppError(400, "Form validation failed", errors))
- }
-
-}
-
-
-module.exports = { validateRegistration };
+module.exports = AppError;
 
 ================
-File: server/repositories/auth.repository.js
-================
-const sql = require('../config/postgresDB');
-
-const createUser = async ({name, lastname, phone, email, passwordHash}) => {
-  const [user] = await sql`
-    INSERT INTO USERS (name, lastname, phone, email, password_hash)
-    VALUES (${name}, ${lastname}, ${phone}, ${email}, ${passwordHash})
-    RETURNING id, name, lastname, phone, email, role
-    `;
-
-  return user;
-}
-
-
-module.exports = { createUser };
-
-================
-File: server/services/auth.service.js
-================
-const bcrypt = require('bcryptjs');
-const AppError = require('../utils/AppError');
-const authRepo = require('../repositories/auth.repository');
-
-const registerUser = async ({ name, lastname, phone, email, password, invite_code }) => {
-  if (invite_code !== 'cammareros-invite')
-    throw new AppError(400, "Enter the correct invite code");
-
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  const user = await authRepo.createUser({ name, lastname, phone, email, passwordHash })
-
-  return user;
-}
-
-module.exports = { registerUser };
-
-================
-File: server/utils/Log.js
+File: server/utils/log.js
 ================
 const chalk = require('chalk').default;
 
@@ -248,20 +143,326 @@ const log = {
 module.exports = log
 
 ================
-File: server/validators/authSchema.validator.js
+File: server/config/postgresDB.js
 ================
-const { z } = require('zod');
+const postgres = require('postgres').default;
 
-const registerFormSchema = z.strictObject({
-  name: z.string().trim().min(1, 'Name is required').max(50),
-  lastname: z.string().trim().min(1, 'Last Name is required').max(50),
-  phone: z.string().trim().regex(/^\d{10}$/, 'The phone number must have 10 digits'),
-  email: z.email({ pattern: z.regexes.email }).trim().min(1, 'Email required').toLowerCase(),
-  password: z.string().trim().min(8, 'Password must be between 8 and 20 characters long').max(20, 'Password must be between 8 and 20 characters long'),
-  invite_code: z.string().trim().min(1, 'Invite code required')
+const sql = postgres({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_DATABASE,
+  username: process.env.DB_USERNAME,
+  password: process.env.DB_PASSWORD,
 })
 
-module.exports = {registerFormSchema}
+module.exports = sql;
+
+================
+File: server/middlewares/errorHandler.middleware.js
+================
+const { ZodError, z } = require("zod");
+const AppError = require("../utils/appError");
+const { PostgresError } = require('postgres').default
+
+module.exports = (err, req, res, next) => {
+
+  if (err instanceof PostgresError) {
+    if (err.code === '23505') {
+      err = new AppError(409, "Email or phone already registered");
+    } else if (err.code === '23503') {
+      err = new AppError(400, "Referenced resource does not exist");
+    } else if (err.code === '22P02') {
+      console.log(err);
+
+      err = new AppError(400, "Invalid parameter format");
+
+    }
+  }
+
+  let statusCode = 500;
+  let status = "Error";
+  let message = "Internal Server Error";
+  let errors = null;
+
+  if (err.isOperational) {
+    statusCode = err.statusCode;
+    status = err.status;
+    message = err.message;
+    errors = err.errors;
+  } else {
+    console.log(err);
+  }
+
+  res.status(statusCode).json({
+    status, message, ...(errors && { errors: errors })
+  })
+
+}
+
+================
+File: server/middlewares/validateSchema.middleware.js
+================
+const AppError = require("../utils/appError");
+
+const validateSchema = (schema) => async (req, res, next) => {
+
+  const result = await schema.safeParseAsync(req.body);
+
+  if (!result?.success) {
+    const errors = result.error.issues.map(i => {
+      return {
+        field: i.path[0],
+        code: i.code,
+        message: i.message
+      }
+    })
+
+    return next(new AppError(400, "Form validation failed", errors))
+  }
+  req.formData = result.data;
+  next();
+
+ }
+
+module.exports = { validateSchema };
+
+================
+File: server/middlewares/verifyAccess.middleware.js
+================
+const AppError = require("../utils/appError");
+const { verifyAccessToken } = require("../utils/token");
+
+module.exports = (req, res, next) => {
+
+  const accessToken = req.cookies?.access_token;
+
+  if (!accessToken) return next(new AppError(401, "Access Token missing"));
+
+  try {
+    const decoded = verifyAccessToken(accessToken);
+    req.user = { id: decoded.id, role: decoded.role }
+    next();
+  } catch (err) {
+    return next(new AppError(401, "Access Token expired or invalid"))
+  }
+
+
+}
+
+================
+File: server/middlewares/verifyRefresh.middleware.js
+================
+const { findValidRefreshToken } = require("../repositories/token.repository");
+const AppError = require("../utils/appError");
+const { clearAuthCookie } = require("../utils/cookie");
+const { verifyRefreshToken, hashToken } = require("../utils/token");
+
+module.exports = async (req, res, next) => {
+
+  const refreshToken = req.cookies?.refresh_token;
+  if (!refreshToken) return next(new AppError(401, "Refresh Token missing"))
+
+  try {
+    verifyRefreshToken(refreshToken);
+
+    const hashRefresh = hashToken(refreshToken);
+    const session = await findValidRefreshToken(hashRefresh)
+
+    if (!session) throw new Error("Refresh token revoked or user inactive")
+
+    req.user = { id: session.user_id, role: session.role }
+    req.refreshTokenHash = hashRefresh;
+    next();
+
+  } catch (err) {
+    clearAuthCookie(res);
+    return next(new AppError(401, "Session invalid or expired. Please Log-In again"))
+  }
+}
+
+================
+File: server/repositories/token.repository.js
+================
+const sql = require('../config/postgresDB');
+
+const insertHashToken = async (user_id, hashToken) => {
+
+  await sql`
+        INSERT INTO refresh_tokens (token_hash, user_id, expires_at)
+        VALUES (${hashToken}, ${user_id}, NOW() + INTERVAL '30 days');
+    `;
+};
+
+const rotateHashToken = async (oldRefreshToken, newRefreshToken) => {
+
+  await sql`
+        UPDATE refresh_tokens
+        SET token_hash = ${newRefreshToken},
+            expires_at = NOW() + INTERVAL '30 days'
+        WHERE token_hash = ${oldRefreshToken}
+    `;
+
+}
+
+const findValidRefreshToken = async (tokenHash) => {
+
+  const [session] = await sql`
+        SELECT rt.token_hash, u.id as user_id, u.role
+        FROM refresh_tokens rt JOIN users u ON rt.user_id = u.id
+        WHERE rt.token_hash = ${tokenHash}
+        AND rt.expires_at > NOW()
+        AND u.is_active = true
+    `;
+
+
+  return session;
+};
+
+const deleteHashToken = async (tokenHash) => {
+  await sql`
+        DELETE FROM refresh_tokens
+        WHERE token_hash = ${tokenHash}
+    `
+};
+
+module.exports = { insertHashToken, findValidRefreshToken, deleteHashToken, rotateHashToken };
+
+================
+File: server/routes/auth.router.js
+================
+const express = require('express');
+const router = express.Router();
+const { validateSchema } = require('../middlewares/validateSchema.middleware');
+const { registerFormSchema, loginFormSchema } = require('../validators/authSchema.validator');
+const authController = require('../controllers/auth.controller');
+const verifyRefresh = require('../middlewares/verifyRefresh.middleware');
+
+
+router.post('/register', validateSchema(registerFormSchema), authController.registerUser);
+router.post('/login', validateSchema(loginFormSchema), authController.loginUser);
+router.post('/logout', verifyRefresh, authController.logoutUser);
+router.post('/refresh', verifyRefresh, authController.refreshToken);
+
+module.exports = router;
+
+================
+File: server/services/clearCookie.service.js
+================
+const { deleteHashToken } = require("../repositories/token.repository");
+const { clearAuthCookie } = require("../utils/cookie");
+const { hashToken } = require("../utils/token");
+
+module.exports = async (refresh_token, res) => {
+  clearAuthCookie(res);
+
+  const hashRefresh = hashToken(refresh_token);
+  await deleteHashToken(hashRefresh);
+
+}
+
+================
+File: server/services/setCookie.service.js
+================
+const { insertHashToken } = require("../repositories/token.repository");
+const { setAuthCookie } = require("../utils/cookie");
+const { signAccessToken, signRefreshToken, hashToken } = require("../utils/token")
+
+
+module.exports = async (user, res) => {
+
+  const accessToken = signAccessToken(user);
+  const refreshToken = signRefreshToken(user);
+
+  const hashRefresh = hashToken(refreshToken);
+  await insertHashToken(user.id, hashRefresh)
+
+
+  setAuthCookie(res, { accessToken, refreshToken });
+
+}
+
+================
+File: server/utils/cookie.js
+================
+const isProd = process.env.NODE_ENV === 'production';
+
+const baseCookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: 'lax'
+};
+
+const accessCookieOptions = {
+  ...baseCookieOptions,
+  path: '/'
+};
+
+const refreshCookieOptions = {
+  ...baseCookieOptions,
+  path: '/api/v1/auth'
+};
+
+const setAuthCookie = (res, { accessToken, refreshToken }) => {
+  res.cookie('access_token', accessToken, {
+    ...accessCookieOptions,
+    maxAge: 15 * 60 * 1000 //15min
+    // maxAge: 10000 //10s
+  });
+
+  res.cookie('refresh_token', refreshToken, {
+    ...refreshCookieOptions,
+    maxAge: 30 * 24 * 60 * 60 * 1000 //30days
+  })
+};
+
+const clearAuthCookie = (res) => {
+  res.clearCookie('access_token', accessCookieOptions);
+  res.clearCookie('refresh_token', refreshCookieOptions);
+}
+
+module.exports = { setAuthCookie, clearAuthCookie }
+
+================
+File: server/utils/token.js
+================
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+const signAccessToken = (user) => {
+  return jwt.sign(
+    { id: user.id, role: user.role },
+    process.env.JWT_ACCESS_SECRET,
+    { expiresIn: '15m' }
+  );
+};
+
+const verifyAccessToken = (token) => {
+  return jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+};
+
+const signRefreshToken = (user) => {
+  return jwt.sign(
+    { id: user.id, jti: crypto.randomUUID() },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: '30d' }
+  )
+}
+
+const verifyRefreshToken = (token) => {
+  return jwt.verify(token, process.env.JWT_REFRESH_SECRET)
+}
+
+const hashToken = (token) => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+module.exports = {
+  signAccessToken,
+  verifyAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  hashToken
+}
 
 ================
 File: .gitignore
@@ -431,22 +632,151 @@ File: README.md
 This app simplifies the organization of the service team across shifts. It lets the maitre create service groups and assign the waiters to them. Team members can easily check their assing groups and mark their unavailable dates
 
 ================
-File: server/utils/AppError.js
+File: server/controllers/auth.controller.js
 ================
-class AppError extends Error {
-  constructor(statusCode, message, errors = null) {
-    super(message);
+const authService = require('../services/auth.service');
+const setCookies = require('../services/setCookie.service');
+const clearCookies = require('../services/clearCookie.service');
+const rotateCookie = require('../services/rotateCookie.service');
 
-    this.statusCode = statusCode;
-    this.status = `${statusCode}`.startsWith(`4`) ? `Fail` : `Error`;
-    this.errors = errors;
-    this.isOperational = true;
+const registerUser = async (req, res, next) => {
+  const user = await authService.registerUser(req.formData);
 
-    Error.captureStackTrace(this, this.constructor);
-  }
+  await setCookies(user, res);
+
+  res.status(201).json({
+    status: 'ok',
+    message: 'User registered successfully!',
+    data: { user }
+  })
 }
 
-module.exports = AppError;
+const loginUser = async (req, res, next) => {
+  const user = await authService.loginUser(req.formData);
+
+  await setCookies(user, res);
+
+  res.status(200).json({
+    status: 'ok',
+    message: 'User logged in successfully!',
+    data: { user }
+  })
+}
+
+const logoutUser = async (req, res, next) => {
+
+  await clearCookies(req.cookies.refresh_token, res)
+
+  res.status(200).json({
+    status: 'ok',
+    message: 'User logged out successfully!'
+  })
+}
+
+const refreshToken = async (req, res, next) => {
+
+  await rotateCookie(req.user, req.refreshTokenHash, res);
+
+  res.status(200).json({
+      status: 'ok',
+      message: 'Token refreshed successfully',
+      user: { user: req.user },
+    });
+}
+
+module.exports = { registerUser, loginUser, logoutUser, refreshToken };
+
+================
+File: server/repositories/auth.repository.js
+================
+const sql = require('../config/postgresDB');
+
+const getInviteCode = async () => {
+  const [inviteCode] = await sql`
+        SELECT * FROM app_settings
+    `;
+
+  return inviteCode.value;
+}
+
+const createUser = async ({name, lastname, phone, email, passwordHash}) => {
+  const [user] = await sql`
+    INSERT INTO USERS (name, lastname, phone, email, password_hash)
+    VALUES (${name}, ${lastname}, ${phone}, ${email}, ${passwordHash})
+    RETURNING id, name, lastname, phone, email, role
+    `;
+
+  return user;
+}
+
+const getUser = async (email) => {
+  const [user] = await sql`
+    SELECT * FROM users WHERE email = ${email}
+    `;
+  return user;
+}
+
+
+module.exports = { getInviteCode, createUser, getUser };
+
+================
+File: server/services/auth.service.js
+================
+const bcrypt = require('bcryptjs');
+const AppError = require('../utils/appError');
+const authRepo = require('../repositories/auth.repository');
+
+const registerUser = async ({ name, lastname, phone, email, password, invite_code }) => {
+
+  const inviteCode = await authRepo.getInviteCode();
+
+  if (invite_code !== inviteCode)
+    throw new AppError(400, "Enter the correct invite code");
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  const user = await authRepo.createUser({ name, lastname, phone, email, passwordHash })
+
+  return user;
+}
+
+const loginUser = async ({ email, password }) => {
+
+  const user = await authRepo.getUser(email);
+
+  if (
+    !user ||
+    !(await bcrypt.compare(password, user.password_hash)) ||
+    !user.is_active
+  ) throw new AppError(400, "Email or Password incorrect");
+
+  const { id, name, lastname, phone, role } = user;
+  return { id, name, lastname, phone, email: user.email, role };
+}
+
+
+module.exports = { registerUser, loginUser };
+
+================
+File: server/validators/authSchema.validator.js
+================
+const { z } = require('zod');
+
+const registerFormSchema = z.strictObject({
+  name: z.string().trim().min(1, 'Name is required').max(50),
+  lastname: z.string().trim().min(1, 'Last Name is required').max(50),
+  phone: z.string().trim().regex(/^\d{10}$/, 'The phone number must have 10 digits'),
+  email: z.email({ pattern: z.regexes.email }).trim().min(1, 'Email required').toLowerCase(),
+  password: z.string().trim().min(8, 'Password must be between 8 and 20 characters long').max(20, 'Password must be between 8 and 20 characters long'),
+  invite_code: z.string().trim().min(1, 'Invite code required')
+})
+
+const loginFormSchema = z.strictObject({
+  email: z.email({ pattern: z.regexes.email }).trim().min(1, 'Email required').toLowerCase(),
+  password: z.string().trim().min(1, 'Password required')
+})
+
+module.exports = {registerFormSchema, loginFormSchema}
 
 ================
 File: server/index.js
@@ -465,15 +795,18 @@ if (process.argv[2] === 'prod') {
 const express = require('express');
 const morgan = require('morgan');
 
-const ErrorHandler = require('./middlewares/ErrorHandler');
-const AppError = require('./utils/AppError');
+const ErrorHandler = require('./middlewares/errorHandler.middleware');
+const AppError = require('./utils/appError');
 const { PostgresError } = require('postgres').default;
 const sql = require('./config/postgresDB');
-const log = require('./utils/Log');
+const log = require('./utils/log');
 const helmet = require('helmet');
+const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
-const userRouter = require('./routes/user.router');
+const authRouter = require('./routes/auth.router');
+const verifyAccess = require('./middlewares/verifyAccess.middleware')
+const verifyRefresh = require('./middlewares/verifyRefresh.middleware')
 
 
 
@@ -481,11 +814,15 @@ const port = process.env.PORT;
 const app = express();
 
 if (process.env.NODE_ENV === 'development') app.use(morgan('dev'));
+app.use(cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true
+}))
 app.use(express.json());
 app.use(cookieParser());
 app.use(helmet());
 
-app.use('/api/v1/user', userRouter);
+app.use('/api/v1/auth', authRouter);
 
 
 app.use((req, res, next) => {
@@ -540,15 +877,12 @@ File: server/package.json
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
-    "crypto": "^1.0.1",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
-    "express-validator": "^7.3.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.12.1",
     "postgres": "^4.1.1",
-    "util": "^0.12.5",
     "zod": "^4.6.7"
   }
 }

@@ -4,9 +4,20 @@ const insertHashToken = async (user_id, hashToken) => {
 
   await sql`
         INSERT INTO refresh_tokens (token_hash, user_id, expires_at)
-        VALUES (${hashToken}, ${user_id}, NOW() + '30d');
+        VALUES (${hashToken}, ${user_id}, NOW() + INTERVAL '30 days');
     `;
 };
+
+const rotateHashToken = async (oldRefreshToken, newRefreshToken) => {
+
+  await sql`
+        UPDATE refresh_tokens
+        SET token_hash = ${newRefreshToken},
+            expires_at = NOW() + INTERVAL '30 days'
+        WHERE token_hash = ${oldRefreshToken}
+    `;
+
+}
 
 const findValidRefreshToken = async (tokenHash) => {
 
@@ -29,4 +40,4 @@ const deleteHashToken = async (tokenHash) => {
     `
 };
 
-module.exports = { insertHashToken, findValidRefreshToken, deleteHashToken };
+module.exports = { insertHashToken, findValidRefreshToken, deleteHashToken, rotateHashToken };

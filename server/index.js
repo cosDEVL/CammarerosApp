@@ -22,10 +22,6 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
 const authRouter = require('./routes/auth.router');
-const verifyAccess = require('./middlewares/verifyAccess.middleware')
-const verifyRefresh = require('./middlewares/verifyRefresh.middleware')
-
-
 
 const port = process.env.PORT;
 const app = express();
@@ -40,14 +36,6 @@ app.use(cookieParser());
 app.use(helmet());
 
 app.use('/api/v1/auth', authRouter);
-
-app.get('/api/v1/auth/get', verifyRefresh, (req, res) => {
-  const test = sql`SELECT 1`;
-
-  // console.log(req.cookies);
-
-  res.send(test);
-})
 
 
 app.use((req, res, next) => {

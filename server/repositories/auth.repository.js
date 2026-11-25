@@ -18,12 +18,12 @@ const createUser = async ({name, lastname, phone, email, passwordHash}) => {
   return user;
 }
 
-const getUserCredentials = async (email) => {
-  const [userCredentials] = await sql`
-    SELECT id, password_hash, role, is_active FROM users WHERE email = ${email}
+const getUser = async (email) => {
+  const [user] = await sql`
+    SELECT * FROM users WHERE email = ${email}
     `;
-  return userCredentials;
+  return user;
 }
 
 
-module.exports = { getInviteCode, createUser, getUserCredentials };
+module.exports = { getInviteCode, createUser, getUser };
