@@ -22,6 +22,6 @@ module.exports = async (req, res, next) => {
 
   } catch (err) {
     clearAuthCookie(res);
-    return next(new AppError(401, "Session invalid or expired. Please Log-In again"))
+    return next(new AppError(401, err.message || "Session invalid or expired. Please Log-In again"))
   }
 }

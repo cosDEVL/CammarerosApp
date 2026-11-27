@@ -22,6 +22,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
 const authRouter = require('./routes/auth.router');
+const selfRouter = require('./routes/self.router');
 
 const port = process.env.PORT;
 const app = express();
@@ -36,6 +37,7 @@ app.use(cookieParser());
 app.use(helmet());
 
 app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/self', selfRouter);
 
 
 app.use((req, res, next) => {
@@ -68,4 +70,4 @@ async function startServer() {
   }
 }
 
-startServer()
+startServer();

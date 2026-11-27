@@ -18,12 +18,36 @@ const createUser = async ({name, lastname, phone, email, passwordHash}) => {
   return user;
 }
 
-const getUser = async (email) => {
+const getAuthenticatedUser = async (email) => {
   const [user] = await sql`
     SELECT * FROM users WHERE email = ${email}
     `;
   return user;
 }
 
+const getUserIdByEmail = async (email) => {
+  const [userId] = await sql`
+        SELECT id, is_active
+        FROM users
+        WHERE email = ${email}
+    `;
 
-module.exports = { getInviteCode, createUser, getUser };
+  return userId;
+}
+
+const resetUserPassword = async (userId, newHashPassword) => {
+  await sql.begin(async (tx) => {
+    await tx`
+        UPDATE users
+        SET password_hash = ${newHashPassword}
+        WHERE id = ${userId}
+    `;
+    await tx`
+      DELETE FROM refresh_tokens
+      WHERE user_id = ${userId}
+    `;
+  })
+}
+
+
+module.exports = { getInviteCode, createUser, getAuthenticatedUser, getUserIdByEmail, resetUserPassword };

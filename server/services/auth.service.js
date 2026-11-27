@@ -18,13 +18,14 @@ const registerUser = async ({ name, lastname, phone, email, password, invite_cod
 
 const loginUser = async ({ email, password }) => {
 
-  const user = await authRepo.getUser(email);
+  const user = await authRepo.getAuthenticatedUser(email);
 
   if (
     !user ||
-    !(await bcrypt.compare(password, user.password_hash)) ||
-    !user.is_active
+    !(await bcrypt.compare(password, user.password_hash))
   ) throw new AppError(401, "Email or Password incorrect");
+
+  if (!user.is_active) throw  new AppError(403, "Access denied")
 
   const { id, name, lastname, phone, role } = user;
   return { id, name, lastname, phone, email: user.email, role };

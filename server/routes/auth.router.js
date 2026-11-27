@@ -1,14 +1,22 @@
 const express = require('express');
 const router = express.Router();
+
 const { validateSchema } = require('../middlewares/validateSchema.middleware');
 const { registerFormSchema, loginFormSchema } = require('../validators/authSchema.validator');
-const authController = require('../controllers/auth.controller');
+const { emailSchema, resetPasswordSchema } = require('../validators/resetPasswordSchema.validator');
+
 const verifyRefresh = require('../middlewares/verifyRefresh.middleware');
+const verifyAccess = require('../middlewares/verifyAccess.middleware');
 
+const { registerUser, loginUser, logoutUser, forgotPassword, resetPassword, refreshToken } = require("../controllers/auth.controller");
 
-router.post('/register', validateSchema(registerFormSchema), authController.registerUser);
-router.post('/login', validateSchema(loginFormSchema), authController.loginUser);
-router.post('/logout', verifyRefresh, authController.logoutUser);
-router.post('/refresh', verifyRefresh, authController.refreshToken);
+router.post('/register', validateSchema(registerFormSchema), registerUser);
+router.post('/login', validateSchema(loginFormSchema), loginUser);
+router.post('/logout', verifyAccess, logoutUser);
+
+router.post('/forgot-password', validateSchema(emailSchema), forgotPassword);
+router.patch('/reset-password/:resetToken', validateSchema(resetPasswordSchema), resetPassword);
+
+router.post('/refresh', verifyRefresh, refreshToken);
 
 module.exports = router;

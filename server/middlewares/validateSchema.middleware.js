@@ -2,7 +2,7 @@ const AppError = require("../utils/appError");
 
 const validateSchema = (schema) => async (req, res, next) => {
 
-  const result = await schema.safeParseAsync(req.body);
+  const result = await schema.safeParseAsync(req.body || {});
 
   if (!result?.success) {
     const errors = result.error.issues.map(i => {
